@@ -169,7 +169,7 @@ jobs:
             exit 1
           fi
           APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
-          echo "${APPLE_API_KEY_CONTENT}" | base64 --decode > "$RUNNER_TEMP/api.p8"
+          printf '%s\n' "${APPLE_API_KEY_CONTENT}" > "$RUNNER_TEMP/api.p8"
           xcrun notarytool submit "dist/${DMG_FILE}" \
             --key "$RUNNER_TEMP/api.p8" \
             --key-id "${APPLE_API_KEY_ID}" \
@@ -424,7 +424,7 @@ jobs:
             exit 1
           fi
           APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
-          echo "${APPLE_API_KEY_CONTENT}" | base64 --decode > "$RUNNER_TEMP/api.p8"
+          printf '%s\n' "${APPLE_API_KEY_CONTENT}" > "$RUNNER_TEMP/api.p8"
           xcrun notarytool submit "dist/GearMac-Universal-${VERSION}.dmg" \
             --key "$RUNNER_TEMP/api.p8" \
             --key-id "${APPLE_API_KEY_ID}" \
