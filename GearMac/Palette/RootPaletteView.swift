@@ -524,10 +524,10 @@ struct RootPaletteView: View {
         refreshActionsMenu()
     }
 
-    /// 与 `keyHandlers` 同理从 `body` 中拆出：单条链无法承载全部修饰。
-    @ViewBuilder
-    private func stateObservers(_ content: some View) -> some View {
-        emojiObservers(content)
+    /// 与 `keyHandlers` 同理从 `body` 中拆出；返回 `AnyView` 切断与外层链的泛型累积，
+    /// 标准 runner 上只有拆开各自求解才能在类型检查时限内完成。
+    private func stateObservers(_ content: some View) -> AnyView {
+        AnyView(emojiObservers(content)
             // 每次显示都会更新 focusToken，使搜索框重新获得焦点。
             .onChange(of: vm.focusToken) {
                 searchFocused = !screenHidesSearchField
@@ -631,13 +631,12 @@ struct RootPaletteView: View {
             // 有多条路径会翻转 `paletteIsCollapsed`，因此让窗口尺寸与之同步。
             .onChange(of: core.paletteCoordinator.paletteIsCollapsed) {
                 core.paletteCoordinator.syncPaletteSize()
-            }
+            })
     }
 
-    /// 从 `body` 中拆出：这么长的单条链已超出类型检查器的推导能力。
-    @ViewBuilder
-    private func keyHandlers(_ content: some View, selection sel: Int) -> some View {
-        content
+    /// 从 `body` 中拆出；返回 `AnyView` 切断与外层链的泛型累积，同 `stateObservers`。
+    private func keyHandlers(_ content: some View, selection sel: Int) -> AnyView {
+        AnyView(content
             // 包含 repeat 阶段：与裸键一样，长按可连续移动。
             .onKeyPress(keys: [.downArrow], phases: [.down, .repeat]) { press in
                 if let reorder = movePinnedOrFavorite(1, modifiers: press.modifiers) { return reorder }
@@ -788,7 +787,7 @@ struct RootPaletteView: View {
                     ASCIIKeyboardLayout.matches(press.key, character: "p")
                 else { return .ignored }
                 return performFilterAction() ? .handled : .ignored
-            }
+            })
     }
 
     /// 沿顶边的细条，用于抓取移动窗口；由外观设置决定是否启用。
