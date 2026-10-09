@@ -1,0 +1,12 @@
+# Cloudflare 本地开发环境变量示例。
+# 说明：复制为 .dev.vars（已在 .gitignore 中忽略）并从 sandbox.polar.sh 填入真实值。
+# 仅 `npm run preview`（wrangler 本地预览）会读取它，用于校验 Polar 结账流程。
+
+# Polar 服务端：sandbox 表示沙盒环境。
+POLAR_SERVER=sandbox
+# Polar 访问令牌（沙盒）。
+POLAR_ACCESS_TOKEN=
+# 订阅制商品 ID。
+POLAR_PRODUCT_MONTHLY=
+# 一次性购买商品 ID。
+POLAR_PRODUCT_ONE_TIME=

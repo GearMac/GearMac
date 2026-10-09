@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // 用 xcodebuild 把 .app 构建到固定路径（build/DerivedData），使应用位置稳定 ——
+      // 这正是 F5 能找到它、并保留辅助功能授权的原因。
+      // DEVELOPER_DIR 强制使用 Xcode 工具链（SwiftUI 宏不在命令行工具里）。
+      // 构建日志交给 Scripts/sync-lsp.sh，由它据此重建 SourceKit-LSP 的标志数据库 ——
+      // 这让跨文件符号在增删/重命名文件时仍能在 VS Code 中解析。
+      // pipefail 保留 xcodebuild 的退出码，使构建失败仍能阻断 F5 / 运行步骤。
+      "label": "Build GearMac.app (debug)",
+      "type": "shell",
+      "command": "bash -c 'set -o pipefail; xcodebuild -project GearMac.xcodeproj -scheme GearMac -configuration Debug -derivedDataPath build/DerivedData build 2>&1 | tee \"${TMPDIR:-/tmp}/gearmac-build.log\"; ec=$?; ./Scripts/sync-lsp.sh \"${TMPDIR:-/tmp}/gearmac-build.log\" >/dev/null 2>&1 || true; exit $ec'",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": { "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer" }
+      },
+      "group": "build",
+      "problemMatcher": ["$swiftc"]
+    },
+    {
+      // 重新构建后重启菜单栏应用。默认构建任务（⌘⇧B）。
+      "label": "Build & Run GearMac (debug)",
+      "type": "shell",
+      "command": "killall 'GearMac-dev' 2>/dev/null; open 'build/DerivedData/Build/Products/Debug/GearMac-dev.app'",
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "Build GearMac.app (debug)",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      // 运行项目的 lint 脚本。
+      "label": "Lint project",
+      "type": "shell",
+      "command": "./Scripts/lint.sh",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+# 中文说明：SwiftLint 是本项目唯一的代码质量工具 —— 刻意没有引入格式化器。
+# 因此本配置只保留能捕获缺陷的规则，对格式化器本该负责的风格保持沉默。见 docs/standards.md。
+
+included:
+  - GearMac
+  - Tests
+
+excluded:
+  - GearMac//DesignSystem/Scrolling/EdgeDissolve.swift
+  - GearMac//DesignSystem/Scrolling/ThinScrollbar.swift
+  - GearMac//Features/Emoji/Model/EmojiData.generated.swift
+  - GearMac//Features/Calculator/Model/CurrencyData.generated.swift
+
+# 以下规则在本代码库中噪声过大，或本身就判错。
+disabled_rules:
+  - todo                                      # 用 issue 跟踪，不靠 linter
+  - trailing_whitespace                       # 纯外观，且没有任何东西会在保存时自动修它
+  - identifier_name                           # 会拒绝 `id`、`dx`、`x` —— 在这里都正确
+  - type_body_length                          # SwiftUI 视图本来就可能很长
+  - function_body_length
+  - file_length                               # RootPaletteView 按设计就有 662 行
+  - cyclomatic_complexity                     # 对 AppEntry.Kind 的 switch 不算复杂
+  - nesting                                   # 命名空间式 enum 是本项目风格
+  - large_tuple
+  - function_parameter_count                  # SwiftUI 初始化器
+  - multiple_closures_with_trailing_closure   # 与 SwiftUI 相冲突
+  - opening_brace                             # ─┐ 属于格式化器的职责，而本仓库没有
+  - trailing_comma                            # ─┘ 格式化器，开了只会成为持续噪声
+  # `count` 是 LauncherRankingRecord 与 PaletteRowIndex 上的命中次数，不是集合元素数。
+  # 该规则会把这两处的 `count == 0` 改写为 `isEmpty`，无法编译。
+  - empty_count
+
+# 以下每条都能防止一类真实缺陷，而不是风格偏好。
+opt_in_rules:
+  - first_where
+  - last_where
+  - contains_over_filter_count
+  - contains_over_first_not_nil
+  - optional_data_string_conversion
+  - implicitly_unwrapped_optional
+  - redundant_nil_coalescing
+  - toggle_bool
+  - static_over_final_class
+  - unneeded_parentheses_in_closure_argument
+  - weak_delegate
+
+# `try!` 永不接受。`force_cast` 偶尔可以 —— AX 与 AppKit 桥接处有四处 —— 因此只警告、不阻断。
+force_try: error
+force_cast: warning
+
+type_name:
+  min_length: 2     # `ID` 就是 Identifiable 的 ID 的正确命名
+
+# 仅警告：长度是判断题，且 harness 的头部注释不算缺陷。
+line_length:
+  warning: 130
+  ignores_urls: true
+  ignores_comments: false

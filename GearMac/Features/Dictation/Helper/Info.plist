@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+	<!-- 中文说明：听写 helper 作为独立无 Dock 进程运行，名称随 Debug/Release 通道变化。 -->
+<plist version="1.0">
+<dict>
+	<!-- 开发区域：取自构建设置。 -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<!-- 显示名 / 可执行名 / bundle id：名称随 Debug/Release 通道变化。 -->
+	<key>CFBundleDisplayName</key>
+	<string>$(DICTATION_EXECUTABLE_NAME)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(DICTATION_EXECUTABLE_NAME)</string>
+	<!-- 包类型与版本号。 -->
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<!-- 无 Dock 图标的辅助进程。 -->
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>

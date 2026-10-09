@@ -1,0 +1,19 @@
+# GitHub 赞助入口配置。
+# 说明：本文件列出项目支持的众筹平台。未配置的平台保持空值即可，GitHub 只会显示已填写的入口。
+# 当前只启用 custom，指向官网的赞助页面。
+
+# 以下为 GitHub 支持的众筹平台（可按需填写）：
+github: # 最多 4 个已启用 GitHub Sponsors 的用户名，例如 [user1, user2]
+patreon: # Patreon 用户名
+open_collective: # Open Collective 用户名
+ko_fi: # Ko-fi 用户名
+tidelift: # Tidelift 的 platform-name/package-name，例如 npm/babel
+community_bridge: # Community Bridge 项目名，例如 cloud-foundry
+liberapay: # Liberapay 用户名
+issuehunt: # IssueHunt 用户名
+lfx_crowdfunding: # LFX Crowdfunding 项目名，例如 cloud-foundry
+buy_me_a_coffee: # Buy Me a Coffee 用户名
+thanks_dev: # thanks.dev 用户名
+# 自定义赞助链接（本项目实际使用的入口）。
+custom:
+  - "https://gearmac.dev/support"

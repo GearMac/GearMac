@@ -1,0 +1,23 @@
+{
+  // 工具链选择由 Swift 扩展管理（命令面板 → "Swift: Select Toolchain" → Xcode）。
+  // 不要在这里固定 swift.path / DEVELOPER_DIR —— 会与该扩展冲突。
+
+  // 代码智能来自 SourceKit-LSP，经 xcode-build-server 生成的 buildServer.json 提供
+  // （见 docs/development.md），因为本工程没有 Package.swift。
+
+  // Xcode 工具链目录里没有 lldb-dap；可用的那一份在 Developer/usr/bin 下。
+  // 把调试器指向它，F5（Run and Debug）才能工作。
+  "swift.debugger.path": "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb-dap",
+
+  // 不让扩展自动追加启动配置 —— 我们调试的是组装好的 .app 包内部的二进制（见 launch.json），
+  // 而不是裸可执行文件。
+  "swift.autoGenerateLaunchConfigurations": false,
+
+  // 格式化使用 Xcode 工具链里的 swift-format，经 sourcekit-lsp 调用 —— 不需要额外扩展或 brew 包。
+  // defaultFormatter 是必需的：不设它 VS Code 就不肯选定格式化器，⌘S 会静默无反应。
+  // `.swift-format` 把它调成本仓库的风格；即便如此，默认格式化器仍必须在 VS Code 侧指定。
+  "[swift]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "swiftlang.swift-vscode"
+  }
+}

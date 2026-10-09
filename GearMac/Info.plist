@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+	<!-- 中文说明：应用清单定义 bundle、URL scheme、备份文件类型、菜单栏模式和系统权限用途。 -->
+<plist version="1.0">
+<dict>
+	<!-- 开发区域：英文。 -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<!-- 可执行文件名与 bundle id：由构建设置注入（渠道决定 bundle id）。 -->
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<!-- 应用名称与包类型。 -->
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!-- App Store 分类：生产力。 -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<!-- 营销版本号与构建号。 -->
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- 注册 raycast / gearmac 等自定义 URL scheme，供外部触发命令。 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Raycast and GearMac URL Scheme</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>raycast</string>
+				<string>gearmac</string>
+				<string>com.raycast</string>
+			</array>
+		</dict>
+	</array>
+	<!-- 导出 .gearmac 备份类型，但刻意不声明 CFBundleDocumentTypes：声明它会让双击 .gearmac
+	     直接启动并覆盖用户数据。类型标识不随渠道变化，以便 Dev 与 stable 能互相读取导出文件。 -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.gearmac.backup</string>
+			<key>UTTypeDescription</key>
+			<string>GearMac Backup</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gearmac</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<!-- 最低系统版本，取自部署目标。 -->
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<!-- 以菜单栏 accessory 运行，不显示 Dock 图标。 -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac</key>
+	<true/>
+	<!-- 以下均为系统能力用途说明（首次触发时 macOS 展示给用户）。 -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>GearMac uses automation to perform system actions you explicitly run.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>GearMac shows a camera preview so you can check yourself, and take a photo to the clipboard.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>GearMac records audio only while you use Dictation, to transcribe it on your Mac.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>GearMac reads today's and tomorrow's events so you can join a meeting from the palette.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>GearMac lets extensions you run read and edit your reminders.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>GearMac uses Bluetooth access only when you run the Toggle Bluetooth action.</string>
+	<!-- 版权与关于面板名称。 -->
+	<key>NSHumanReadableCopyright</key>
+	<string>GearMac</string>
+</dict>
+</plist>

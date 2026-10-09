@@ -1,0 +1,53 @@
+// GearMac 官网（website/，Next.js）的 TypeScript 配置。
+// 说明：目标 ES2023、bundler 解析、严格模式；`@/*` 指向 src，`@/.source/*` 指向生成的 .source。
+{
+  "compilerOptions": {
+    // 编译目标与可用的内置库。
+    "target": "ES2023",
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "module": "esnext",
+    // 交由打包器（Next.js）解析模块。
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    // 跳过第三方声明文件类型检查，加快编译。
+    "skipLibCheck": true,
+    // 开启全部严格检查。
+    "strict": true,
+    // 只做类型检查，不产出文件（构建交给 Next.js）。
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // 增量编译缓存。
+    "incremental": true,
+    // 强制使用 `import type` 等显式类型导入语法。
+    "verbatimModuleSyntax": true,
+    // 未使用的局部变量 / 参数 / switch 落空都要报错。
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    // 路径别名：@/* 指向 src，@/.source/* 指向生成内容。
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/.source/*": ["./.source/*"]
+    },
+    // Next.js 的 TypeScript 插件。
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  // 参与类型检查的文件（含 Next.js 与生成类型）。
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".source/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  // 排除依赖与构建产物；worker 目录有自己的 tsconfig。
+  "exclude": ["node_modules", "out", ".next", "worker"]
+}

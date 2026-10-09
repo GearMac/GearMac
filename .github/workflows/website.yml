@@ -1,0 +1,76 @@
+name: Website
+
+# 中文说明：在 website/ 构建 Next.js 站点并部署到 Cloudflare（https://gearmac.dev/）。
+# 旧的 GitHub Pages 地址仅保留用于 301 跳转 —— 见 `redirect` job。
+# 需要：CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID secrets、仓库 Settings → Pages →
+# Source = "GitHub Actions"、Custom domain = gearmac.dev（均为一次性设置）。fork 没有这些，
+# 因此两个 job 都先校验仓库，避免在别人的 Actions 页上失败。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/website.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时刻只允许一次站点部署，但绝不取消进行中的那一次：
+# 取消正在运行的 deploy-pages 会破坏部署，使下一次运行报 "Deployment failed, try again later"。
+# 改为让排队的运行合并。
+concurrency:
+  group: website
+  cancel-in-progress: false
+
+jobs:
+  cloudflare:
+    if: github.repository == 'GearMac/GearMac'
+    runs-on: ubuntu-latest
+    environment:
+      name: cloudflare
+      url: https://gearmac.dev/
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install
+        working-directory: website
+        run: npm install
+      # 构建会从 GitHub API 读取版本、star 数与变更日志；token 把这些查询从 runner IP 的
+      # 匿名限额中解放出来，而安装脚本永远看不到它。
+      - name: Build
+        working-directory: website
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run build
+      - name: Deploy to Cloudflare
+        working-directory: website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          POLAR_ACCESS_TOKEN: ${{ secrets.POLAR_ACCESS_TOKEN }}
+        run: |
+          secrets="$RUNNER_TEMP/worker-secrets.json"
+          jq -n '{POLAR_ACCESS_TOKEN: env.POLAR_ACCESS_TOKEN}' > "$secrets"
+          npm run deploy -- --secrets-file "$secrets"
+
+  # 只发布一个 CNAME，正是它让 GitHub 在自己的边缘把 GearMac.github.io/gearmac/*
+  # 301 到 gearmac.dev/* —— 不需要 HTML，也不需要 meta refresh。它刻意独立于 Cloudflare job：
+  # 那里部署失败不该把转发器一并拖掉。
+  redirect:
+    if: github.repository == 'GearMac/GearMac'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: website/redirect
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // F5：先构建 .app，再调试包内部的二进制，这样 NSBundle.main 能解析 Info.plist（LSUIElement）
+      // 与资源。路径与构建任务使用的固定 -derivedDataPath 一致。
+      "type": "swift",
+      "request": "launch",
+      "name": "Run GearMac-dev (bundled .app)",
+      "program": "${workspaceFolder}/build/DerivedData/Build/Products/Debug/GearMac-dev.app/Contents/MacOS/GearMac-dev",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build GearMac.app (debug)"
+    }
+  ]
+}

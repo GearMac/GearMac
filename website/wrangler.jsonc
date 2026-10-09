@@ -1,0 +1,41 @@
+// Cloudflare Workers / Wrangler 配置（官网部署）。
+// 说明：静态站点从 out/ 提供，仅 Polar 结账与支持者接口走 Worker 代码。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Worker 名称。
+  "name": "gearmac-website",
+  // 兼容性日期：决定 Worker 运行时的行为版本。
+  "compatibility_date": "2026-09-17",
+  // 入口脚本：仅 Polar 相关路由会运行它；其余路径不经代码，直接从 `out/` 提供。
+  "main": "./worker/index.ts",
+  // 静态资源绑定。
+  "assets": {
+    // Next.js 导出目录。
+    "directory": "./out",
+    // 资源绑定名（供 Worker 内 env.ASSETS 使用）。
+    "binding": "ASSETS",
+    // `trailingSlash: true` 会把每个路由导出为目录 index，因此 /docs/install/ 才能解析。
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+    // 这些路径优先交给 Worker（而非静态资源）。
+    "run_worker_first": ["/api/supporters", "/api/checkout"],
+  },
+  // 限流：按访问者计；namespace_id 只需在 Cloudflare 账号内唯一。
+  "ratelimits": [
+    {
+      "name": "CHECKOUT_LIMIT",
+      "namespace_id": "1001",
+      "simple": { "limit": 20, "period": 60 },
+    },
+  ],
+  // 运行时环境变量（非密文）：Polar 服务端与商品 ID。
+  "vars": {
+    "POLAR_SERVER": "production",
+    "POLAR_PRODUCT_MONTHLY": "2133bfd9-3a03-4315-bdc8-dc87795eae2e",
+    "POLAR_PRODUCT_ONE_TIME": "673a92cd-b7e9-4647-9d23-60b30f229e0d",
+  },
+  // 仅使用根域名；www 是 Cloudflare 面板里的一条重定向规则，不是第二个源站。
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "gearmac.dev", "custom_domain": true }],
+}

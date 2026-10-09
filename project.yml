@@ -1,0 +1,155 @@
+# 中文配置说明：本文件是 XcodeGen 唯一项目源文件；构建 target、通道标识、签名和 helper 嵌入均在此声明。
+name: GearMac
+# options：工程级选项。
+options:
+  # bundleIdPrefix：未显式指定 bundle id 时的前缀。
+  bundleIdPrefix: com.gearmac
+  # deploymentTarget：最低支持 macOS 15；26 专属能力（Liquid Glass、FoundationModels）
+  # 在运行时按 #available 分支降级，见 DesignSystem/ 与 Features/AI/Service/。
+  deploymentTarget:
+    macOS: "15.0"
+  # createIntermediateGroups：按源码目录自动生成中间分组。
+  createIntermediateGroups: true
+  # groupSortPosition：分组排序位置（top 使分组排在散文件之前）。
+  groupSortPosition: top
+
+# settings：全工程共享的构建设置。
+settings:
+  # base：所有配置共用的默认值。
+  base:
+    # 营销版本号与构建号。
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Swift 6 语言模式。
+    SWIFT_VERSION: "6.0"
+    # 不绑定开发团队，走手工签名。
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Manual
+    # 签名身份：本机 Developer ID 证书（含 Team ID）。钥匙串 ACL 与 TCC 授权按 Team ID 锚定，
+    # 重新编译后无需再次输密码授权；此前自签身份（无 Team ID）只能按构建哈希授权，
+    # 每次重建都触发钥匙串弹窗。详见 docs/signing.md「本地开发签名」。
+    # CI（release.yml）会以命令行覆盖为发布渠道身份，不受此项影响。
+    CODE_SIGN_IDENTITY: "Developer ID Application: Xihu Ding (XZMKPL5R57)"
+    # 完整严格并发检查：数据竞争是硬错误。
+    SWIFT_STRICT_CONCURRENCY: complete
+    # 渠道 bundle id 的默认值（Debug 会覆盖）。
+    GEARMAC_BUNDLE_IDENTIFIER: com.gearmac.app
+  # configs：按构建配置覆盖。
+  configs:
+    # Debug 是独立渠道：独立 bundle id，避免本地构建共享/破坏已安装版本的偏好、缓存、TCC 授权与登录项。
+    Debug:
+      GEARMAC_BUNDLE_IDENTIFIER: com.gearmac.app.dev
+      DICTATION_EXECUTABLE_NAME: GearMac-dev Dictation
+    Release:
+      DICTATION_EXECUTABLE_NAME: GearMac Dictation
+      # 仅 Release 开启（公证要求）：Debug 不开，避免 library validation 干扰调试器与 debug 附着库。
+      ENABLE_HARDENED_RUNTIME: YES
+      # 剥离发行二进制（dSYM 仍会先生成）并移除未使用代码。
+      DEPLOYMENT_POSTPROCESSING: YES
+      STRIP_INSTALLED_PRODUCT: YES
+      STRIP_SWIFT_SYMBOLS: YES
+      DEAD_CODE_STRIPPING: YES
+
+# targets：三个构建目标（主应用 + 两个 helper 进程）。
+targets:
+  # 主应用。
+  GearMac:
+    type: application
+    platform: macOS
+    # sources：主应用的源码与资源。
+    sources:
+      - path: GearMac
+        # 排除 helper 自身的源码：编进来会把 Vision 与 PDFKit 链接进应用，
+        # 而这正是“把识别放到进程外”要避免的事。
+        excludes:
+          - Features/Clipboard/Service/ClipboardTextExtractor.swift
+          - Features/Clipboard/Service/ClipboardTextHelper.swift
+          - Features/Dictation/Helper
+          - Resources/EmojiKeywords
+      # 以“文件夹引用”方式加入，让 Emoji 词包保留自己的目录（`EmojiIndex` 会按目录列出）。
+      - path: GearMac/Resources/EmojiKeywords
+        type: folder
+      # MIT 标注的许可证要求通知随二进制一同分发，而不仅停留在仓库里。
+      - path: NOTICE.md
+        buildPhase: resources
+    # dependencies：依赖与嵌入的 helper。
+    dependencies:
+      - target: DictationHelper
+        link: false
+        embed: false
+      # 按当前渠道（而非 Xcode 默认配置）解析要嵌入的 helper。
+      - framework: "$(BUILT_PRODUCTS_DIR)/$(DICTATION_EXECUTABLE_NAME).app"
+        link: false
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
+      - target: ClipboardTextHelper
+        link: false
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(GEARMAC_BUNDLE_IDENTIFIER)"
+        # 对外产物名（.app 文件名、CFBundleName、进程名）与工程/target 名（GearMac）一致。
+        PRODUCT_NAME: GearMac
+        INFOPLIST_FILE: GearMac/Info.plist
+        CODE_SIGN_ENTITLEMENTS: GearMac/GearMac.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: gearmac
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+      configs:
+        # Debug 是独立渠道（同 release.yml 里的 beta/stable）：独立 bundle id 让本地构建拥有自己的
+        # 偏好、缓存、TCC 授权与登录项，而不会继承——进而破坏——已安装应用的状态。
+        Debug:
+          PRODUCT_NAME: GearMac-dev
+
+  # 剪贴板文本识别 helper（command line tool，用完即退，把 Vision/PDFKit 的内存限制在独立进程内）。
+  ClipboardTextHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - GearMac/Features/Clipboard/Service/ClipboardTextExtractor.swift
+      - GearMac/Features/Clipboard/Service/ClipboardTextHelper.swift
+    settings:
+      base:
+        # release.yml 会在 xcodebuild 命令行传 PRODUCT_NAME，这会命中每个 target：若不固定这两项，
+        # 渠道构建会重命名 `ClipboardTextWorker` 寻找的可执行文件，并让模块名带上空格。
+        EXECUTABLE_NAME: ClipboardTextHelper
+        PRODUCT_MODULE_NAME: ClipboardTextHelper
+        SKIP_INSTALL: YES
+
+  # 听写 helper（独立 .app，LSUIElement，承载模型推理，可被杀掉并回收）。
+  DictationHelper:
+    type: application
+    platform: macOS
+    info:
+      path: GearMac/Features/Dictation/Helper/Info.plist
+      properties:
+        CFBundleName: "$(DICTATION_EXECUTABLE_NAME)"
+        CFBundleDisplayName: "$(DICTATION_EXECUTABLE_NAME)"
+        LSUIElement: true
+    sources:
+      - GearMac/Features/Dictation/Helper
+      - GearMac/Features/Dictation/Model/DictationModel.swift
+      - GearMac/Features/Dictation/Model/DictationAudioChunks.swift
+      - GearMac/Features/Dictation/Model/DictationLanguage.swift
+      - GearMac/Features/Dictation/Service/DictationWire.swift
+      - GearMac/Localization/L10n.swift
+      - GearMac/Localization/AppLanguage.swift
+      - GearMac/Localization/DictationKeys.swift
+    settings:
+      base:
+        EXECUTABLE_NAME: "$(DICTATION_EXECUTABLE_NAME)"
+        PRODUCT_NAME: "$(DICTATION_EXECUTABLE_NAME)"
+        WRAPPER_NAME: "$(DICTATION_EXECUTABLE_NAME).app"
+        PRODUCT_MODULE_NAME: DictationHelper
+        PRODUCT_BUNDLE_IDENTIFIER: "$(GEARMAC_BUNDLE_IDENTIFIER).dictation"
+        SKIP_INSTALL: YES
+        SWIFT_OPTIMIZATION_LEVEL: -O

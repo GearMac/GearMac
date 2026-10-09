@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+	<!-- 中文说明：权限声明对应扩展运行时、自动化、相机、麦克风和日历等能力。 -->
+<plist version="1.0">
+<dict>
+	<!-- 未开启 App Sandbox：作为启动器需调用 AXUIElement、注册 Carbon 全局热键、执行 shell、读写任意用户目录、运行扩展。 -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<!-- JavaScriptCore 会编译每条扩展命令，因此强化运行时必须允许 JIT。 -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<!-- 不声明此项时，强化运行时会拒绝所有 Apple Event，且没有可恢复的提示。 -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<!-- 未声明时 tccd 直接拒绝：不弹对话框，请求被当作已拒绝。 -->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<!-- 麦克风采集属于 GearMac；听写 helper 只通过管道接收音频。 -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- 读取日历（会议加入卡）。 -->
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+</dict>
+</plist>

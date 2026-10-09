@@ -1,0 +1,422 @@
+name: Release
+
+# 在 Actions 列表中显示为版本 + 渠道，而不是光秃秃的 "Release"。
+run-name: "GearMac ${{ inputs.version }} · ${{ inputs.channel }} #${{ github.run_number }}"
+
+# 从 Actions 页手动触发。选择渠道与基础版本；
+# beta 构建会自动递增后缀，因此重跑不会碰撞。
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        type: choice
+        options: [beta, stable]
+        default: beta
+      version:
+        description: "Base version, e.g. 0.2.0 (no channel suffix)"
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  # 触发 Website 工作流；后者在构建时读取版本号与变更日志。
+  actions: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    # 供 `universal` job 使用，使渠道身份只在一个地方推导。
+    outputs:
+      full_version: ${{ steps.meta.outputs.full_version }}
+      display_name: ${{ steps.meta.outputs.display_name }}
+      bundle_id: ${{ steps.meta.outputs.bundle_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: |
+          XCODE_PATH="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          if [ -z "$XCODE_PATH" ]; then
+            echo "::error::No Xcode 26.x found on this runner. Installed Xcodes:"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "Using $XCODE_PATH"
+          echo "DEVELOPER_DIR=$XCODE_PATH/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Compute release metadata
+        id: meta
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          BASE_VERSION="${{ github.event.inputs.version }}"
+          # 每个渠道都是独立并存的应用：各自的显示名 + bundle id，
+          # 以及 GearMac/homebrew-gearmac tap 中各自的 Homebrew cask。
+          case "$CHANNEL" in
+            beta)   SUFFIX="-beta.${GITHUB_RUN_NUMBER}";  DISPLAY="GearMac Beta";  BUNDLE="com.gearmac.app.beta";  CASK="gearmac@beta";  PRERELEASE=true ;;
+            stable) SUFFIX="";                            DISPLAY="GearMac";       BUNDLE="com.gearmac.app";       CASK="gearmac";       PRERELEASE=false ;;
+          esac
+          FULL="${BASE_VERSION}${SUFFIX}"
+          {
+            echo "full_version=${FULL}"
+            echo "display_name=${DISPLAY}"
+            echo "bundle_id=${BUNDLE}"
+            echo "cask_name=${CASK}"
+            echo "dmg_file=GearMac-${FULL}.dmg"
+            echo "zip_file=GearMac-${FULL}.zip"
+            echo "prerelease=${PRERELEASE}"
+          } >> "$GITHUB_OUTPUT"
+
+      # 把稳定的自签名身份导入临时 keychain，使每次发布都用同一张证书签名 ——
+      # 正是这种恒定的签名保证了用户的辅助功能（TCC）授权在更新后仍然有效。
+      # 按 docs/signing.md 生成/轮换这些密钥。
+      - name: Import signing certificate
+        env:
+          P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KPW="$(openssl rand -base64 24)"
+          echo "${P12_BASE64}" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KPW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "${P12_PASSWORD}" -A -T /usr/bin/codesign
+          # 让 codesign 无需交互即可使用该密钥。
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KPW" "$KEYCHAIN" >/dev/null
+          # 前置到搜索列表中，使 xcodebuild 的 codesign 能找到 "GearMac Self-Signed"。
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      # 把已签名的 .app 构建到临时 DerivedData 目录。渠道身份（名称、bundle id、
+      # 版本）来自构建设置覆盖，使 beta/stable 能并存发行。
+      - name: Build app
+        env:
+          VERSION: ${{ steps.meta.outputs.full_version }}
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+          BUNDLE_ID: ${{ steps.meta.outputs.bundle_id }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          # ARCHS 固定为该渠道一直发布的架构：相信 ARCHS_STANDARD 曾让一个瘦身 arm64 构建
+          # 到达过 Intel 用户（见 compat/README.md）。
+          xcodebuild -project GearMac.xcodeproj -scheme GearMac -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="GearMac Self-Signed" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
+            PRODUCT_NAME="$DISPLAY_NAME" GEARMAC_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            build
+
+      # Apple 芯片用户不应为 Intel 切片付费：断言下载物保持瘦身。两个二进制都要查 ——
+      # 随包分发的 helper 也是交付代码，而别处都不会发现它里面混入的额外切片。
+      - name: Assert the build is arm64-only
+        env:
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+          for BIN in "$APP/Contents/MacOS/${DISPLAY_NAME}" "$APP/Contents/Helpers/ClipboardTextHelper" "$APP/Contents/Helpers/GearMac Dictation.app/Contents/MacOS/GearMac Dictation"; do
+            SLICES="$(lipo -archs "$BIN")"
+            if [ "$SLICES" != "arm64" ]; then
+              echo "::error::${BIN##*/}: expected arm64 alone, got '$SLICES'"
+              exit 1
+            fi
+          done
+
+      #公证会拒绝未开启强化运行时的嵌套二进制，而 helper 由一个独立的嵌入阶段签名 ——
+      # 因此要断言该标志确实传到了它，而不是信任 Xcode。
+      - name: Assert the signature is notarizable
+        env:
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+        run: ./Scripts/verify-signature.sh "$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+
+      # 一次构建产出两个产物：用户下载、cask 安装的 DMG，以及应用内更新器安装的 zip ——
+      # 后者用 `ditto` 展开，而不是挂载盘。
+      - name: Package DMG and ZIP
+        env:
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+          DMG_FILE: ${{ steps.meta.outputs.dmg_file }}
+          ZIP_FILE: ${{ steps.meta.outputs.zip_file }}
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          mkdir -p dist
+          diskutil image create from "$STAGE" --format UDZO --volumeName "$DISPLAY_NAME" "dist/${DMG_FILE}"
+          # `ditto -c -k --keepParent --sequesterRsrc` 是唯一能保持代码签名可验证的 zip；
+          # 普通 `zip` 会丢掉符号链接、破坏签名封条。
+          ditto -c -k --keepParent --sequesterRsrc "$APP" "dist/${ZIP_FILE}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GearMac-${{ steps.meta.outputs.full_version }}
+          path: dist/
+
+      # 变更日志由 GitHub 从已合并的 PR 推导，下方安装文案置于更新窗口会截断的标记之下。
+      # 不会提交到任何地方 —— 见 docs/release.md。
+      - name: Compose release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CHANNEL: ${{ github.event.inputs.channel }}
+          TAG: v${{ steps.meta.outputs.full_version }}
+          SHA: ${{ github.sha }}
+          VERSION: ${{ steps.meta.outputs.full_version }}
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+          BUNDLE_ID: ${{ steps.meta.outputs.bundle_id }}
+          CASK: ${{ steps.meta.outputs.cask_name }}
+        run: ./Scripts/release-notes.sh "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/changelog.md"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.meta.outputs.full_version }}"
+          PRERELEASE_FLAG=""
+          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          # 用 --notes-file，绝不用 --generate-notes：gh 会把 --notes 前置到生成的笔记上，
+          # 反而把安装样板文案又推到变更日志上面。
+          gh release create "$TAG" \
+            "dist/${{ steps.meta.outputs.dmg_file }}" \
+            "dist/${{ steps.meta.outputs.zip_file }}" \
+            --title "${{ steps.meta.outputs.display_name }} ${{ steps.meta.outputs.full_version }}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            $PRERELEASE_FLAG
+
+      - name: Update Homebrew cask
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          CASK: ${{ steps.meta.outputs.cask_name }}
+          VERSION: ${{ steps.meta.outputs.full_version }}
+          DMG_FILE: ${{ steps.meta.outputs.dmg_file }}
+        run: |
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN secret not set — skipping cask bump. Add it to enable auto-updates of the tap."
+            exit 0
+          fi
+          SHA="$(shasum -a 256 "dist/${DMG_FILE}" | awk '{print $1}')"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/GearMac/homebrew-gearmac.git" tap
+          CASK_FILE="tap/Casks/${CASK}.rb"
+          if [ ! -f "$CASK_FILE" ]; then
+            echo "::error::$CASK_FILE not found in tap."
+            exit 1
+          fi
+          sed -i '' -E "s|^  version \".*\"|  version \"${VERSION}\"|" "$CASK_FILE"
+          sed -i '' -E "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" "$CASK_FILE"
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Casks/${CASK}.rb"
+          if git diff --cached --quiet; then
+            echo "No cask changes to commit."
+          else
+            git commit -m "${CASK} ${VERSION}"
+            git push
+          fi
+
+      # 站点在构建时烘焙最新版本与变更日志，因此稳定版发布会重建站点。dispatch 是 GITHUB_TOKEN
+      # 唯一可以启动另一个工作流的事件。
+      - name: Rebuild the website
+        if: github.event.inputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run website.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      # 在 Discord 发布频道宣布本次发布。使用 Components V2（flags 32768）卡片：
+      # 频道色调容器、标题 + 右对齐下载按钮、变更日志、Homebrew 代码块。
+      # 若未设置 webhook secret 则空操作并给出警告。
+      - name: Announce on Discord
+        if: success()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          CHANNEL: ${{ github.event.inputs.channel }}
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+          VERSION: ${{ steps.meta.outputs.full_version }}
+          CASK: ${{ steps.meta.outputs.cask_name }}
+          TAG: v${{ steps.meta.outputs.full_version }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL secret not set — skipping Discord announcement."
+            exit 0
+          fi
+          if [ "${CHANNEL}" = "stable" ]; then COLOR=3066993; else COLOR=15844367; fi
+          RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          INSTALL="brew install --cask GearMac/homebrew-gearmac/${CASK}"
+          # 用 jq 构建，使反引号保持字面量（单引号 printf 会转义它们，
+          # 于是 Discord 把代码块渲染成了逐字反引号）。
+          # Components V2 禁止顶层 `content`，因此 @everyone 是一个文本组件，
+          # 且不设 allowed_mentions 时 Discord 会把该提醒渲染为惰性文本。
+          jq -n \
+            --argjson color "${COLOR}" \
+            --arg heading "## 🚀 ${DISPLAY_NAME} ${VERSION}" \
+            --arg sub "Now available on the **${CHANNEL}** channel." \
+            --arg install "${INSTALL}" \
+            --arg url "${RELEASE_URL}" \
+            --rawfile changelog "${RUNNER_TEMP}/changelog.md" \
+            '{
+              flags: 32768,
+              allowed_mentions: { parse: ["everyone"] },
+              components: [
+                { type: 10, content: "@everyone" },
+                { type: 17, accent_color: $color, components: [
+                  { type: 9,
+                    components: [ { type: 10, content: ($heading + "\n" + $sub) } ],
+                    accessory: { type: 2, style: 5, label: "Download", url: $url }
+                  },
+                  { type: 14 },
+                  { type: 10, content: ($changelog | rtrimstr("\n")) },
+                  { type: 14 },
+                  { type: 10, content: ("**Install / update via Homebrew**\n```\n" + $install + "\n```") }
+                ] }
+              ]
+            }' > payload.json
+          curl -fsS -X POST -H "Content-Type: application/json" -d @payload.json \
+            "${DISCORD_WEBHOOK_URL}?with_components=true"
+
+  # macOS 26 是最后一个能在 Intel 上启动的版本，因此稳定版另以独立 cask 发布一个通用构建。
+  # 相同的 tag、版本、bundle id 与签名 —— 只有切片与文件名不同，因此这里不会改变上面
+  # Apple 芯片 job 发布的内容。
+  universal:
+    needs: build
+    if: github.event.inputs.channel == 'stable'
+    runs-on: macos-26
+    env:
+      VERSION: ${{ needs.build.outputs.full_version }}
+      DISPLAY_NAME: ${{ needs.build.outputs.display_name }}
+      BUNDLE_ID: ${{ needs.build.outputs.bundle_id }}
+      CASK: gearmac-universal
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: |
+          XCODE_PATH="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          if [ -z "$XCODE_PATH" ]; then
+            echo "::error::No Xcode 26.x found on this runner. Installed Xcodes:"
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          echo "Using $XCODE_PATH"
+          echo "DEVELOPER_DIR=$XCODE_PATH/Contents/Developer" >> "$GITHUB_ENV"
+
+      # 与瘦身构建相同的身份；若缺失则硬失败：应用内更新器在安装前会比较暂存 bundle 的
+      # 叶证书与正在运行的应用的叶证书。
+      - name: Import signing certificate
+        env:
+          P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "${P12_BASE64}" ]; then
+            echo "::error::SIGNING_P12_BASE64 not set — a differently-signed build cannot self-update."
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KPW="$(openssl rand -base64 24)"
+          echo "${P12_BASE64}" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KPW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "${P12_PASSWORD}" -A -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KPW" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build app
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          xcodebuild -project GearMac.xcodeproj -scheme GearMac -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="GearMac Self-Signed" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
+            PRODUCT_NAME="$DISPLAY_NAME" GEARMAC_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            build
+
+      # 静默丢弃 ARCHS 覆盖会在通用版名下发布一个瘦身构建，而这正是整个渠道存在的意义所在。
+      # 瘦身的 bundled helper 是它的隐蔽版本：应用仍能在 Intel 上启动，只是 OCR 不工作了。
+      - name: Assert both slices on the shipping binaries
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+          PLIST_MIN="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
+          echo "LSMinimumSystemVersion=$PLIST_MIN"
+          if [ "$PLIST_MIN" != "26.0" ]; then
+            echo "::error::expected LSMinimumSystemVersion 26.0, got $PLIST_MIN"
+            exit 1
+          fi
+          for BIN in "$APP/Contents/MacOS/${DISPLAY_NAME}" "$APP/Contents/Helpers/ClipboardTextHelper" "$APP/Contents/Helpers/GearMac Dictation.app/Contents/MacOS/GearMac Dictation"; do
+            SLICES="$(lipo -archs "$BIN")"
+            echo "${BIN##*/}: arch=$SLICES"
+            for A in arm64 x86_64; do
+              case " $SLICES " in
+                *" $A "*) ;;
+                *) echo "::error::${BIN##*/}: no $A slice — this is not a universal build"; exit 1 ;;
+              esac
+              MINOS="$(xcrun vtool -arch "$A" -show-build-version "$BIN" | awk '/minos/{print $2}')"
+              if [ "$MINOS" != "26.0" ]; then
+                echo "::error::${BIN##*/} $A: expected a macOS 26.0 floor, got minos=$MINOS"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Assert the signature is notarizable
+        run: ./Scripts/verify-signature.sh "$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+
+      - name: Package DMG and ZIP
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          mkdir -p dist
+          diskutil image create from "$STAGE" --format UDZO --volumeName "$DISPLAY_NAME" \
+            "dist/GearMac-Universal-${VERSION}.dmg"
+          ditto -c -k --keepParent --sequesterRsrc "$APP" "dist/GearMac-Universal-${VERSION}.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GearMac-Universal-${{ needs.build.outputs.full_version }}
+          path: dist/
+
+      # 只上传、不创建：发布由 build job 负责。后上传也保证瘦身 zip 排在资源列表首位，
+      # 使不感知架构的老客户端仍能选中它。
+      - name: Attach to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "v${VERSION}" \
+            "dist/GearMac-Universal-${VERSION}.dmg" \
+            "dist/GearMac-Universal-${VERSION}.zip"
+
+      - name: Update Homebrew cask
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN secret not set — skipping cask bump."
+            exit 0
+          fi
+          SHA="$(shasum -a 256 "dist/GearMac-Universal-${VERSION}.dmg" | awk '{print $1}')"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/GearMac/homebrew-gearmac.git" tap
+          CASK_FILE="tap/Casks/${CASK}.rb"
+          if [ ! -f "$CASK_FILE" ]; then
+            echo "::error::$CASK_FILE not found in tap."
+            exit 1
+          fi
+          sed -i '' -E "s|^  version \".*\"|  version \"${VERSION}\"|" "$CASK_FILE"
+          sed -i '' -E "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" "$CASK_FILE"
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Casks/${CASK}.rb"
+          if git diff --cached --quiet; then
+            echo "No cask changes to commit."
+          else
+            git commit -m "${CASK} ${VERSION}"
+            git push
+          fi

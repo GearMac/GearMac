@@ -1,0 +1,4 @@
+{
+  // 官方 Swift 扩展是本套配置唯一需要的扩展 —— 它驱动 SourceKit-LSP 提供代码智能。
+  "recommendations": ["swiftlang.swift-vscode"]
+}

@@ -1,0 +1,20 @@
+// Cloudflare Worker（website/worker/）的 TypeScript 配置。
+// 说明：只编译 worker 目录下的 *.ts；不引入 DOM 类型（Worker 运行时无 DOM）。
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    // 不注入任何全局类型（Worker 使用 @cloudflare/workers-types 之外的显式类型）。
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["*.ts"]
+}

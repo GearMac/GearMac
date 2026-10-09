@@ -1,0 +1,41 @@
+name: Website media
+
+# 中文说明：把 website/media/ 镜像到 cdn.gearmac.dev 背后的 R2 桶。那里的资源都超出 Workers
+# 单资源 25 MiB 上限，因此不会进入 Next.js 导出。刻意从 Website 工作流中拆出：GitHub 的路径过滤
+# 可以阻止文档里一个错字就重传几十 MB 媒体。同时做了仓库判断 —— fork 没有 R2 桶，也没有可访问它的密钥。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/media/**"
+      - "Scripts/upload-website-media.sh"
+      - ".github/workflows/website-media.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-media
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    if: github.repository == 'GearMac/GearMac'
+    runs-on: ubuntu-latest
+    environment: cloudflare
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install
+        working-directory: website
+        run: npm install
+      # 与维护者本地运行的是同一脚本，因此只有一条上传路径，而不是两条。
+      - name: Upload to R2
+        working-directory: website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run upload-media

@@ -1,0 +1,10 @@
+# issue 模板选择器的配置。
+# 说明：关闭“空白 issue”，改为引导用户到 Discord 提问，避免无效 issue。
+
+# 不允许创建空白 issue。
+blank_issues_enabled: false
+# 联系方式：把提问、想法与闲聊导向 Discord。
+contact_links:
+  - name: Discord
+    url: https://discord.gg/v2Eeb4QQy3
+    about: Questions, ideas, and general chat.

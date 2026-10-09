@@ -1,0 +1,166 @@
+// 文件职责：会话历史的列表视图、单行视图与右侧预览视图。
+// 分层：UI（SwiftUI 视图）；仅负责展示与选中回调，数据来自 ChatHistoryStore 与 AIChatState。
+import SwiftUI
+
+/// 会话历史列表：按时间桶分组渲染标题与行，并处理选中、双击与右键。
+struct ChatHistoryList: View {
+
+    @Environment(\.metrics) private var metrics
+    let results: [ChatConversation]
+    let selectedID: ChatConversation.ID?
+    let scroll: ScrollIntent
+    let onSelect: (ChatConversation) -> Void
+    let onActivate: () -> Void
+    let onActions: (ChatConversation) -> Void
+
+    /// 列表中的一行：分组标题或一条会话。
+    private enum Row: Identifiable {
+        case header(String)
+        case conversation(ChatConversation)
+
+        var id: String {
+            switch self {
+            case .header(let title): return "header-" + title
+            case .conversation(let conversation): return conversation.id.uuidString
+            }
+        }
+    }
+
+    /// 选中的是否为第一条会话，用于滚动时吸附到原点。
+    private var firstRowSelected: Bool {
+        selectedID != nil && selectedID == results.first?.id
+    }
+
+    /// 把会话按日期桶展开成“标题 + 会话行”的扁平列表。
+    private var rows: [Row] {
+        var rows: [Row] = []
+        var currentBucket: DateBucket?
+        for conversation in results {
+            let bucket = DateBucket(for: conversation.updatedAt)
+            if bucket != currentBucket {
+                rows.append(.header(bucket.title))
+                currentBucket = bucket
+            }
+            rows.append(.conversation(conversation))
+        }
+        return rows
+    }
+
+    var body: some View {
+        let rows = rows
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        switch row {
+                        case .header(let title):
+                            SectionHeader(title: title, isFirst: row.id == rows.first?.id)
+                        case .conversation(let conversation):
+                            ChatHistoryRow(
+                                conversation: conversation,
+                                selected: conversation.id == selectedID
+                            )
+                            .selectionFrame(conversation.id == selectedID)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onSelect(conversation) }
+                            .simultaneousGesture(
+                                TapGesture(count: 2).onEnded {
+                                    onSelect(conversation)
+                                    onActivate()
+                                }
+                            )
+                            .onRightClick { onActions(conversation) }
+                        }
+                    }
+                }
+                .padding(.horizontal, metrics.spacing.md)
+                .padding(.top, metrics.spacing.xs)
+                .padding(.bottom, metrics.spacing.md)
+                .hideNativeScrollers()
+                .scrollOriginAnchor()
+            }
+            .edgeDissolve()
+            .thinScrollbar()
+            // 选中第一行时吸附到原点，使其分组标题也能一并显示。
+            .scrollFollowsSelection(
+                scroll, row: selectedID?.uuidString, atOrigin: firstRowSelected, proxy: proxy)
+        }
+    }
+}
+
+/// 单条会话行：图标、标题、预览与更新时间。
+private struct ChatHistoryRow: View {
+
+    @Environment(\.metrics) private var metrics
+    let conversation: ChatConversation
+    let selected: Bool
+    @State private var hovered = false
+
+    private var fill: Color {
+        if selected { return Theme.Colors.selection }
+        if hovered { return Theme.Colors.rowHover }
+        return .clear
+    }
+
+    var body: some View {
+        IconCache.observeStyle()
+        return HStack(spacing: metrics.spacing.lg) {
+            Image(nsImage: IconCache.symbolIcon(named: "bubble.left")).resizable()
+                .frame(width: metrics.size.resultRowIcon, height: metrics.size.resultRowIcon)
+            VStack(alignment: .leading, spacing: metrics.spacing.xxs) {
+                Text(conversation.displayTitle)
+                    .font(metrics.typography.rowTitle)
+                    .lineLimit(1)
+                if !conversation.preview.isEmpty {
+                    Text(conversation.preview)
+                        .font(metrics.typography.keyCap)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Text(conversation.updatedAt.formatted(date: .omitted, time: .shortened))
+                .font(metrics.typography.keyCap)
+                .foregroundStyle(Theme.Colors.textTertiary)
+        }
+        .padding(.horizontal, metrics.spacing.md)
+        .padding(.vertical, metrics.spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: metrics.radius.row, style: .continuous).fill(fill)
+        )
+        .armedHover($hovered)
+    }
+}
+
+/// 右侧预览：展示当前选中会话的对话记录；是当前会话时直接用实时状态。
+struct ChatHistoryPreview: View {
+    let history: ChatHistoryStore
+    let chat: AIChatState
+    let conversationID: UUID?
+    @State private var session: ChatSession?
+
+    var body: some View {
+        Group {
+            if conversationID == chat.session.id, !chat.session.messages.isEmpty {
+                ChatTranscriptView(
+                    messages: chat.session.messages, status: chat.liveStatus, usage: chat.usage,
+                    surface: .palette)
+            } else if let session {
+                ChatTranscriptView(
+                    messages: session.messages, status: nil, usage: nil,
+                    surface: .palette)
+            } else if conversationID != nil {
+                ProgressView().controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: conversationID) {
+            session = nil
+            guard let conversationID else { return }
+            guard conversationID != chat.session.id || chat.session.messages.isEmpty else { return }
+            session = history.session(id: conversationID)
+        }
+    }
+}
