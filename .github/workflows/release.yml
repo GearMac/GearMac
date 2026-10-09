@@ -99,12 +99,14 @@ jobs:
           # ARCHS 固定为该渠道一直发布的架构：相信 ARCHS_STANDARD 曾让一个瘦身 arm64 构建
           # 到达过 Intel 用户（见 compat/README.md）。Developer ID 签名附带 secure timestamp
           # （xcodebuild 默认启用），这是公证的硬性要求，因此不再覆盖 OTHER_CODE_SIGN_FLAGS。
+          # singlefile 编译：标准 runner 上 whole-module 类型检查会超时，报错位置随修补漂移。
           xcodebuild -project GearMac.xcodeproj -scheme GearMac -configuration Release \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: Xihu Ding (XZMKPL5R57)" \
             PRODUCT_NAME="$DISPLAY_NAME" GEARMAC_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            SWIFT_COMPILATION_MODE=singlefile \
             build
 
       # Apple 芯片用户不应为 Intel 切片付费：断言下载物保持瘦身。两个二进制都要查 ——
@@ -365,6 +367,7 @@ jobs:
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: Xihu Ding (XZMKPL5R57)" \
             PRODUCT_NAME="$DISPLAY_NAME" GEARMAC_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            SWIFT_COMPILATION_MODE=singlefile \
             build
 
       # 静默丢弃 ARCHS 覆盖会在通用版名下发布一个瘦身构建，而这正是整个渠道存在的意义所在。
