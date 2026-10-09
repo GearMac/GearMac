@@ -527,7 +527,12 @@ struct RootPaletteView: View {
     /// 与 `keyHandlers` 同理从 `body` 中拆出；返回 `AnyView` 切断与外层链的泛型累积，
     /// 标准 runner 上只有拆开各自求解才能在类型检查时限内完成。
     private func stateObservers(_ content: some View) -> AnyView {
-        AnyView(emojiObservers(content)
+        AnyView(presentationObservers(queryObservers(emojiObservers(content))))
+    }
+
+    /// 查询文本与筛选条件驱动的观察者；拆开是为了各自落在类型检查时限内。
+    private func queryObservers(_ content: some View) -> AnyView {
+        AnyView(content
             // 每次显示都会更新 focusToken，使搜索框重新获得焦点。
             .onChange(of: vm.focusToken) {
                 searchFocused = !screenHidesSearchField
@@ -559,7 +564,12 @@ struct RootPaletteView: View {
             .onChange(of: vm.fileSearchFilter) {
                 land()
                 fileSearch.search(vm.query, filter: vm.fileSearchFilter)
-            }
+            })
+    }
+
+    /// 模式、菜单与呈现生命周期驱动的观察者；同 `queryObservers` 拆开求解。
+    private func presentationObservers(_ content: some View) -> AnyView {
+        AnyView(content
             .onChange(of: vm.mode) {
                 vm.clipboardFilter = .all
                 vm.fileSearchFilter = .all
