@@ -15,10 +15,11 @@ It builds a Release `GearMac.app` signed with `GearMac Self-Signed` and packs it
 
 ## Signing & Gatekeeper
 
-Both local builds and CI releases sign with the same stable `GearMac Self-Signed` identity, not an
-Apple Developer ID — so macOS quarantines a directly-downloaded DMG. The Homebrew cask strips that
-automatically; direct downloaders run `xattr -dr com.apple.quarantine "…/GearMac.app"` once. Full
-details in [signing.md](signing.md).
+Local builds and CI releases both sign with the **Developer ID Application** identity
+`Xihu Ding (XZMKPL5R57)`, and CI additionally **notarizes** the DMG with `xcrun notarytool` and
+staples the ticket onto the app and the DMG — so a directly-downloaded DMG opens without a
+Gatekeeper warning. The identity and notary credentials live in GitHub secrets; see
+[signing.md](signing.md).
 
 ## How the in-app updater consumes a release
 

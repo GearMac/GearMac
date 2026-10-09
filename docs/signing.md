@@ -11,8 +11,9 @@ GearMac is signed with **two identities, one per audience**:
   same Team ID anchoring keeps the Accessibility (TCC) grant stable across rebuilds, which was the
   original reason a *stable* self-signed identity was introduced — Developer ID does that strictly
   better.
-- **CI releases** keep signing with the stable self-signed identity `GearMac Self-Signed` (imported
-  from two GitHub secrets). This is unchanged and staged — see
+- **CI releases** sign with the same **Developer ID Application** certificate (imported from GitHub
+  secrets) and are **notarized** with `xcrun notarytool`, so a directly-downloaded DMG opens without a
+  Gatekeeper warning. The migration from `GearMac Self-Signed` is complete — see
   [The Developer ID migration](#the-developer-id-migration).
 
 You create each identity **once**:
@@ -29,7 +30,7 @@ security find-identity -v -p codesigning | grep "Developer ID Application"
 If codesign asks once for the keychain password to use the private key, approve "Always Allow" —
 like everything else anchored to the Team ID, that prompt happens once, ever.
 
-## 2. Create the `GearMac Self-Signed` identity (once — CI releases)
+## 2. Create the `GearMac Self-Signed` identity (once — legacy)
 
 Run these in a terminal. They generate a self-signed code-signing certificate and import it into your
 login keychain:
@@ -64,8 +65,8 @@ Now local builds (Xcode, VS Code F5, `xcodebuild`) sign with it, and you grant A
 
 ## 3. Generate the CI secrets
 
-The release workflow needs the same identity as two repo secrets. Export it, base64-encode it, and
-pick a password:
+The release workflow needs the Developer ID identity and the notary credentials as repo secrets.
+Export the identity (approve the keychain dialog if asked), base64-encode it, and pick a password:
 
 ```sh
 # Pick a random password for the exported bundle.
@@ -86,6 +87,17 @@ UI under **Settings → Secrets and variables → Actions**):
 gh secret set SIGNING_P12_BASE64   --repo GearMac/GearMac < /tmp/signing.p12.base64
 gh secret set SIGNING_P12_PASSWORD --repo GearMac/GearMac --body "$P12_PASSWORD"
 rm -f /tmp/signing.p12.base64   # holds your private key — delete it
+```
+
+Notarization authenticates with an App Store Connect API key (Users and Access → Integrations →
+App Store Connect API). Download the `.p8` once and set three more secrets:
+
+```sh
+base64 -i AuthKey_<KEYID>.p8 | tr -d '\n' > /tmp/api.b64
+gh secret set APPLE_API_KEY_CONTENT --repo GearMac/GearMac < /tmp/api.b64
+gh secret set APPLE_API_KEY_ID     --repo GearMac/GearMac --body "<KEYID>"
+gh secret set APPLE_API_ISSUER_ID  --repo GearMac/GearMac --body "<ISSUER-UUID>"
+rm -f /tmp/api.b64 AuthKey_<KEYID>.p8
 ```
 
 If you ever lose the secrets, just re-run this section — as long as the `GearMac Self-Signed`
@@ -132,23 +144,23 @@ missing its entitlement ships a permission that can never be granted.
 
 ## The Developer ID migration
 
-`BundleSignature` already accepts a bundle signed by the GearMac team under Apple's Developer ID
-chain, even though releases are still signed with `GearMac Self-Signed`. That is deliberate and
-staged: the updater compares signatures before it installs, so the code that trusts the new identity
-has to reach users *before* the first build carrying it. Until the switch it also accepts the running
-app's own leaf, which is the only thing a copy installed earlier knows how to check.
+`BundleSignature` accepts a bundle signed by the GearMac team under Apple's Developer ID chain, and
+since the CI switch it also accepts the running app's own leaf — the only thing a copy installed
+before the migration knows how to check. Releases are now signed `Developer ID Application`, so a
+copy that predates the switch updates once through its own-leaf branch and thereafter verifies the
+chain like everyone else.
 
 The requirement pins the team rather than the certificate, so a Developer ID renewal strands nobody.
 It deliberately omits the `notarized` keyword — that resolves a ticket through `syspolicyd` or the
 network, and the updater verifies in a cache directory Gatekeeper has never assessed, so an offline
 Mac would refuse a bundle the chain already proves is ours.
 
-**The Developer ID identity is used locally; the release workflow still names `GearMac Self-Signed`
-on its `xcodebuild` line.** `project.yml` signs local builds with the Developer ID certificate so
-keychain and TCC grants anchor to the Team ID; contributors without that certificate can override
-`CODE_SIGN_IDENTITY` on the command line with a self-signed identity of their own — they will
-re-grant Accessibility and keychain access once per rebuild (the cdhash behaviour above), which is
-the trade macOS gives identities without a Team ID.
+**Both local builds and CI releases sign with the same `Developer ID Application` identity, and CI
+output is notarized and stapled.** `project.yml` signs local builds with the Developer ID
+certificate so keychain and TCC grants anchor to the Team ID; contributors without that certificate
+can override `CODE_SIGN_IDENTITY` on the command line with a self-signed identity of their own —
+they will re-grant Accessibility and keychain access once per rebuild (the cdhash behaviour above),
+which is the trade macOS gives identities without a Team ID.
 
 **Keep `GearMac Self-Signed` in the login keychain after the switch.** It is the only way to ship a
 build that a copy predating the migration could still install.

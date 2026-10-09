@@ -67,9 +67,8 @@ jobs:
             echo "prerelease=${PRERELEASE}"
           } >> "$GITHUB_OUTPUT"
 
-      # 把稳定的自签名身份导入临时 keychain，使每次发布都用同一张证书签名 ——
-      # 正是这种恒定的签名保证了用户的辅助功能（TCC）授权在更新后仍然有效。
-      # 按 docs/signing.md 生成/轮换这些密钥。
+      # 把 Developer ID 证书导入临时 keychain：CI 与本地构建同一身份，应用内更新器比较叶证书
+      # 才会接受安装，TCC/钥匙串授权也按同一 Team ID 锚定。按 docs/signing.md 导出/轮换。
       - name: Import signing certificate
         env:
           P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
@@ -98,12 +97,12 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           # ARCHS 固定为该渠道一直发布的架构：相信 ARCHS_STANDARD 曾让一个瘦身 arm64 构建
-          # 到达过 Intel 用户（见 compat/README.md）。
+          # 到达过 Intel 用户（见 compat/README.md）。Developer ID 签名附带 secure timestamp
+          # （xcodebuild 默认启用），这是公证的硬性要求，因此不再覆盖 OTHER_CODE_SIGN_FLAGS。
           xcodebuild -project GearMac.xcodeproj -scheme GearMac -configuration Release \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="GearMac Self-Signed" \
-            OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: Xihu Ding (XZMKPL5R57)" \
             PRODUCT_NAME="$DISPLAY_NAME" GEARMAC_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             build
@@ -131,7 +130,8 @@ jobs:
         run: ./Scripts/verify-signature.sh "$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
 
       # 一次构建产出两个产物：用户下载、cask 安装的 DMG，以及应用内更新器安装的 zip ——
-      # 后者用 `ditto` 展开，而不是挂载盘。
+      # 后者用 `ditto` 展开，而不是挂载盘。DMG 本身也要签名（带 secure timestamp），
+      # 否则 stapler 拒绝为它附加公证票据。
       - name: Package DMG and ZIP
         env:
           DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
@@ -144,8 +144,39 @@ jobs:
           ln -s /Applications "$STAGE/Applications"
           mkdir -p dist
           diskutil image create from "$STAGE" --format UDZO --volumeName "$DISPLAY_NAME" "dist/${DMG_FILE}"
+          codesign --sign "Developer ID Application: Xihu Ding (XZMKPL5R57)" --timestamp "dist/${DMG_FILE}"
           # `ditto -c -k --keepParent --sequesterRsrc` 是唯一能保持代码签名可验证的 zip；
           # 普通 `zip` 会丢掉符号链接、破坏签名封条。
+          ditto -c -k --keepParent --sequesterRsrc "$APP" "dist/${ZIP_FILE}"
+
+      # 公证（notarization）：Apple 扫描通过后，直接下载的用户双击 DMG 不再被 Gatekeeper 拦截。
+      # 提交 DMG —— 票据会覆盖其内的 .app 与全部嵌套 helper；staple 把票据钉进
+      # .app 与 DMG，使离线首次运行也能过。zip 的消费方是应用内更新器，它只校验签名链，
+      # 因此 zip 无需票据，但要在 staple 之后重打，保证与最终 .app 逐字节一致。
+      - name: Notarize and staple
+        env:
+          DISPLAY_NAME: ${{ steps.meta.outputs.display_name }}
+          DMG_FILE: ${{ steps.meta.outputs.dmg_file }}
+          ZIP_FILE: ${{ steps.meta.outputs.zip_file }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          if [ -z "${APPLE_API_KEY_CONTENT}" ]; then
+            echo "::error::APPLE_API_KEY_CONTENT secret not set — notarization is required for Developer ID releases."
+            exit 1
+          fi
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+          echo "${APPLE_API_KEY_CONTENT}" | base64 --decode > "$RUNNER_TEMP/api.p8"
+          xcrun notarytool submit "dist/${DMG_FILE}" \
+            --key "$RUNNER_TEMP/api.p8" \
+            --key-id "${APPLE_API_KEY_ID}" \
+            --issuer "${APPLE_API_ISSUER_ID}" \
+            --wait
+          rm -f "$RUNNER_TEMP/api.p8"
+          xcrun stapler staple "$APP"
+          xcrun stapler staple "dist/${DMG_FILE}"
+          xcrun stapler validate "$APP" "dist/${DMG_FILE}"
           ditto -c -k --keepParent --sequesterRsrc "$APP" "dist/${ZIP_FILE}"
 
       - uses: actions/upload-artifact@v7
@@ -302,8 +333,8 @@ jobs:
           echo "Using $XCODE_PATH"
           echo "DEVELOPER_DIR=$XCODE_PATH/Contents/Developer" >> "$GITHUB_ENV"
 
-      # 与瘦身构建相同的身份；若缺失则硬失败：应用内更新器在安装前会比较暂存 bundle 的
-      # 叶证书与正在运行的应用的叶证书。
+      # 与瘦身构建相同的 Developer ID 身份：应用内更新器在安装前会比较叶证书，
+      # 通用版若换了身份就会被拒。
       - name: Import signing certificate
         env:
           P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
@@ -331,8 +362,7 @@ jobs:
           xcodebuild -project GearMac.xcodeproj -scheme GearMac -configuration Release \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="GearMac Self-Signed" \
-            OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: Xihu Ding (XZMKPL5R57)" \
             PRODUCT_NAME="$DISPLAY_NAME" GEARMAC_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             build
@@ -376,6 +406,31 @@ jobs:
           mkdir -p dist
           diskutil image create from "$STAGE" --format UDZO --volumeName "$DISPLAY_NAME" \
             "dist/GearMac-Universal-${VERSION}.dmg"
+          codesign --sign "Developer ID Application: Xihu Ding (XZMKPL5R57)" --timestamp "dist/GearMac-Universal-${VERSION}.dmg"
+          ditto -c -k --keepParent --sequesterRsrc "$APP" "dist/GearMac-Universal-${VERSION}.zip"
+
+      # 与瘦身 job 相同的公证流程；Intel 用户的首次运行同样不能被 Gatekeeper 拦截。
+      - name: Notarize and staple
+        env:
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          if [ -z "${APPLE_API_KEY_CONTENT}" ]; then
+            echo "::error::APPLE_API_KEY_CONTENT secret not set — notarization is required for Developer ID releases."
+            exit 1
+          fi
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/${DISPLAY_NAME}.app"
+          echo "${APPLE_API_KEY_CONTENT}" | base64 --decode > "$RUNNER_TEMP/api.p8"
+          xcrun notarytool submit "dist/GearMac-Universal-${VERSION}.dmg" \
+            --key "$RUNNER_TEMP/api.p8" \
+            --key-id "${APPLE_API_KEY_ID}" \
+            --issuer "${APPLE_API_ISSUER_ID}" \
+            --wait
+          rm -f "$RUNNER_TEMP/api.p8"
+          xcrun stapler staple "$APP"
+          xcrun stapler staple "dist/GearMac-Universal-${VERSION}.dmg"
+          xcrun stapler validate "$APP" "dist/GearMac-Universal-${VERSION}.dmg"
           ditto -c -k --keepParent --sequesterRsrc "$APP" "dist/GearMac-Universal-${VERSION}.zip"
 
       - uses: actions/upload-artifact@v7
