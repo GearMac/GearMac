@@ -529,10 +529,8 @@ struct RootPaletteView: View {
     private func stateObservers(_ content: some View) -> some View {
         emojiObservers(content)
             // 每次显示都会更新 focusToken，使搜索框重新获得焦点。
-            // 显式 Bool 中间变量：直接穿透 existential 的单行赋值在 CI runner 上超出类型检查时限。
             .onChange(of: vm.focusToken) {
-                let hidden: Bool = screen.hidesSearchField
-                searchFocused = !hidden
+                searchFocused = !screenHidesSearchField
             }
             // 保留的屏幕会按离开时的状态重新唤起，因此菜单必须随面板一同结束。
             .modifier(PaletteHideObserver { if menuOpen { closeMenus() } })
@@ -572,8 +570,7 @@ struct RootPaletteView: View {
                 land()
                 // 停靠与常规布局的尺寸不同，模式切换必须同步窗口框架。
                 core.paletteCoordinator.syncPaletteSize()
-                let hidden: Bool = screen.hidesSearchField
-                searchFocused = !hidden
+                searchFocused = !screenHidesSearchField
                 // 离开卸载屏幕的所有方式：返回箭头、裸退格、重新唤起。
                 if vm.mode != .uninstall { uninstall.cancel() }
                 // 无查询进入即空白屏幕自身对最近项的请求。
@@ -627,8 +624,7 @@ struct RootPaletteView: View {
             }
             // 首次显示在 `prepare` 之后才构建本视图，因此没有任何处理器见到那次重置。
             .onAppear {
-                let hidden: Bool = screen.hidesSearchField
-                searchFocused = !hidden
+                searchFocused = !screenHidesSearchField
                 land()
             }
             .modifier(SearchFieldHiding(hidden: hidesSearchField, apply: applySearchFieldHiding))
@@ -980,6 +976,11 @@ struct RootPaletteView: View {
         // 剪贴板把输入框迁到标签行而非隐藏；提前返回也切断 screen 与字段视图的相互构建。
         if vm.mode == .clipboard { return false }
         return screen.hidesSearchField
+    }
+
+    /// 长修饰链的闭包里直接打开 existential 求解会超出 CI 的时间预算，收敛到此处求解一次。
+    private var screenHidesSearchField: Bool {
+        screen.hidesSearchField
     }
 
     /// 输入框保持挂载并隐藏而非替换：放入分支会拆掉其编辑器。
